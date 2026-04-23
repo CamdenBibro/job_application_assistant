@@ -48,6 +48,11 @@ function normalizeWhitespace(text: string) {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function decodeHtmlEntities(text: string) {
+  const $ = load(`<span>${text}</span>`);
+  return $("span").text();
+}
+
 function extractKeywords(text: string, maxKeywords: number) {
   const tokens = text
     .toLowerCase()
@@ -82,16 +87,99 @@ function extractLikelyJobDescription(html: string) {
     "body",
   ];
 
-  const candidates = selectors
+  const selectorCandidates = selectors
     .map((selector) => normalizeWhitespace($(selector).text()))
     .filter((text) => text.length > 200);
 
-  const best = candidates.sort((a, b) => b.length - a.length)[0] ?? "";
-  const title = normalizeWhitespace($("title").first().text());
+  const metaDescriptions = [
+    $("meta[property='og:description']").attr("content"),
+    $("meta[name='description']").attr("content"),
+    $("meta[name='twitter:description']").attr("content"),
+  ]
+    .map((value) => decodeHtmlEntities(normalizeWhitespace(value ?? "")))
+    .filter((text) => text.length > 80);
+
+  const jsonLdDescriptions: string[] = [];
+  const jsonLdTitles: string[] = [];
+  $("script[type='application/ld+json']").each((_, element) => {
+    const raw = $(element).contents().text().trim();
+    if (!raw) return;
+
+    try {
+      const parsed = JSON.parse(raw);
+      const stack = Array.isArray(parsed) ? [...parsed] : [parsed];
+
+      while (stack.length > 0) {
+        const current = stack.pop();
+        if (!current || typeof current !== "object") continue;
+
+        const record = current as Record<string, unknown>;
+        if (typeof record.description === "string") {
+          const description = decodeHtmlEntities(
+            normalizeWhitespace(record.description),
+          );
+          if (description.length > 80) {
+            jsonLdDescriptions.push(description);
+          }
+        }
+
+        const candidateTitle =
+          typeof record.title === "string"
+            ? record.title
+            : typeof record.name === "string"
+              ? record.name
+              : "";
+        if (candidateTitle) {
+          jsonLdTitles.push(
+            decodeHtmlEntities(normalizeWhitespace(candidateTitle)),
+          );
+        }
+
+        const nestedValues = Object.values(record).filter(
+          (value) => value && typeof value === "object",
+        );
+        for (const value of nestedValues) {
+          if (Array.isArray(value)) {
+            stack.push(...value);
+          } else {
+            stack.push(value);
+          }
+        }
+      }
+    } catch {
+      // Ignore malformed JSON-LD blocks and continue with other extraction methods.
+    }
+  });
+
+  const bestSelectorDescription =
+    selectorCandidates.sort((a, b) => b.length - a.length)[0] ?? "";
+  const bestJsonLdDescription =
+    jsonLdDescriptions.sort((a, b) => b.length - a.length)[0] ?? "";
+  const bestMetaDescription =
+    metaDescriptions.sort((a, b) => b.length - a.length)[0] ?? "";
+  const description =
+    bestSelectorDescription || bestJsonLdDescription || bestMetaDescription;
+
+  const titleCandidates = [
+    normalizeWhitespace($("meta[property='og:title']").attr("content") ?? ""),
+    normalizeWhitespace($("meta[name='title']").attr("content") ?? ""),
+    ...jsonLdTitles,
+    normalizeWhitespace($("title").first().text()),
+  ].filter(Boolean);
+  const title = decodeHtmlEntities(titleCandidates[0] ?? "Unknown job title");
+
+  const extractionMethod = bestSelectorDescription
+    ? "main-content"
+    : bestJsonLdDescription
+      ? "json-ld"
+      : bestMetaDescription
+        ? "meta-tags"
+        : "none";
 
   return {
-    title: title || "Unknown job title",
-    description: best.slice(0, 16000),
+    title,
+    description: description.slice(0, 16000),
+    extractionMethod,
   };
 }
 
@@ -122,19 +210,26 @@ export const tools = {
       }
 
       const html = await response.text();
-      const { title, description } = extractLikelyJobDescription(html);
+      const { title, description, extractionMethod } =
+        extractLikelyJobDescription(html);
 
       if (description.length < 200) {
         return {
           jobUrl,
           title,
           description,
+          extractionMethod,
           warning:
             "The extracted job description is short. The page may require JavaScript rendering.",
         };
       }
 
-      return { jobUrl, title, description };
+      return {
+        jobUrl,
+        title,
+        description,
+        extractionMethod,
+      };
     },
   }),
 
