@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useChat } from "@ai-sdk/react";
-import { DefaultChatTransport } from "ai";
+import { DefaultChatTransport, type UIMessage } from "ai";
 
 import { BASELINE_RESUME } from "@/lib/prompts";
 
@@ -10,14 +10,46 @@ function formatJson(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+type SavedChat = {
+  id: string;
+  label: string;
+  createdAt: string;
+  jobUrl: string;
+  requestNote: string;
+  resume: string;
+  messages: UIMessage[];
+};
+
+const SAVED_CHATS_STORAGE_KEY = "job-application-agent.saved-chats.v1";
+
+function formatTimestamp(dateIsoString: string) {
+  const date = new Date(dateIsoString);
+  return date.toLocaleString();
+}
+
 export default function Home() {
+  const [savedChats, setSavedChats] = useState<SavedChat[]>(() => {
+    if (typeof window === "undefined") {
+      return [];
+    }
+
+    try {
+      const rawValue = localStorage.getItem(SAVED_CHATS_STORAGE_KEY);
+      if (!rawValue) return [];
+      const parsed = JSON.parse(rawValue) as SavedChat[];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
   const [jobUrl, setJobUrl] = useState("");
   const [resume, setResume] = useState(BASELINE_RESUME);
   const [requestNote, setRequestNote] = useState(
     "Tailor my resume and draft a cover letter for this role.",
   );
+  const [historyLabel, setHistoryLabel] = useState("");
 
-  const { messages, sendMessage, status, error, stop } = useChat({
+  const { messages, sendMessage, setMessages, status, error, stop } = useChat({
     transport: new DefaultChatTransport({
       api: "/api/agent",
     }),
@@ -30,6 +62,53 @@ export default function Home() {
     () => messages.filter((message) => message.role === "assistant"),
     [messages],
   );
+
+  useEffect(() => {
+    localStorage.setItem(SAVED_CHATS_STORAGE_KEY, JSON.stringify(savedChats));
+  }, [savedChats]);
+
+  const clearChat = () => {
+    if (isRunning) return;
+    setMessages([]);
+  };
+
+  const saveCurrentChat = () => {
+    if (!messages.length) return;
+
+    const now = new Date();
+    const label =
+      historyLabel.trim() ||
+      jobUrl.trim() ||
+      `Saved chat ${now.toLocaleDateString()}`;
+
+    const nextChat: SavedChat = {
+      id: `${now.getTime()}-${Math.random().toString(36).slice(2, 8)}`,
+      label,
+      createdAt: now.toISOString(),
+      jobUrl: jobUrl.trim(),
+      requestNote: requestNote.trim(),
+      resume,
+      messages,
+    };
+
+    setSavedChats((prevChats) => [nextChat, ...prevChats].slice(0, 20));
+    setHistoryLabel("");
+  };
+
+  const loadSavedChat = (chat: SavedChat) => {
+    if (isRunning) return;
+
+    setJobUrl(chat.jobUrl);
+    setRequestNote(chat.requestNote || "");
+    setResume(chat.resume || BASELINE_RESUME);
+    setMessages(chat.messages);
+  };
+
+  const deleteSavedChat = (chatId: string) => {
+    setSavedChats((prevChats) =>
+      prevChats.filter((savedChat) => savedChat.id !== chatId),
+    );
+  };
 
   return (
     <main className="min-h-screen bg-zinc-50 px-4 py-8 text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
@@ -119,8 +198,79 @@ export default function Home() {
               >
                 Stop
               </button>
+              <button
+                type="button"
+                onClick={clearChat}
+                disabled={isRunning || messages.length === 0}
+                className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700"
+              >
+                Clear chat
+              </button>
             </div>
           </form>
+
+          <div className="mt-5 border-t border-zinc-200 pt-4 dark:border-zinc-800">
+            <h3 className="text-sm font-semibold">Saved chat history</h3>
+            <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+              Save the current chat locally in this browser and reload it later.
+            </p>
+
+            <div className="mt-3 flex gap-2">
+              <input
+                type="text"
+                placeholder="Optional save name"
+                className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none ring-blue-500 focus:ring-2 dark:border-zinc-700 dark:bg-zinc-950"
+                value={historyLabel}
+                onChange={(event) => setHistoryLabel(event.target.value)}
+                disabled={isRunning}
+              />
+              <button
+                type="button"
+                onClick={saveCurrentChat}
+                disabled={isRunning || messages.length === 0}
+                className="whitespace-nowrap rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700"
+              >
+                Save
+              </button>
+            </div>
+
+            {savedChats.length === 0 ? (
+              <p className="mt-3 text-xs text-zinc-500">
+                No saved chats yet.
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-2">
+                {savedChats.map((chat) => (
+                  <li
+                    key={chat.id}
+                    className="rounded-md border border-zinc-200 bg-zinc-50 p-2 text-xs dark:border-zinc-800 dark:bg-zinc-950"
+                  >
+                    <p className="font-medium">{chat.label}</p>
+                    <p className="mt-0.5 text-zinc-500">
+                      {formatTimestamp(chat.createdAt)}
+                    </p>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => loadSavedChat(chat)}
+                        disabled={isRunning}
+                        className="rounded border border-zinc-300 px-2 py-1 font-medium disabled:cursor-not-allowed disabled:opacity-60 dark:border-zinc-700"
+                      >
+                        Load
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteSavedChat(chat.id)}
+                        className="rounded border border-zinc-300 px-2 py-1 font-medium dark:border-zinc-700"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </section>
 
         <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
