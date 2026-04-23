@@ -24,7 +24,7 @@ export default function Home() {
   });
 
   const isRunning = status === "submitted" || status === "streaming";
-  const canSubmit = jobUrl.trim().length > 0 && status === "ready";
+  const canSubmit = jobUrl.trim().length > 0 && !isRunning;
 
   const assistantMessages = useMemo(
     () => messages.filter((message) => message.role === "assistant"),

@@ -50,6 +50,18 @@ npm run dev
 
 Open `http://localhost:3000`.
 
+If you test from another device or load the app via LAN IP (for example
+`http://192.168.x.x:3000`), this project already enables:
+
+- `next dev --hostname 0.0.0.0`
+- `allowedDevOrigins` for detected LAN addresses
+
+If your network setup is unusual, you can explicitly allow hosts:
+
+```bash
+NEXT_ALLOWED_DEV_ORIGINS=192.168.1.103,devbox.local npm run dev
+```
+
 ## Demo Flow
 
 1. Paste a job posting URL
