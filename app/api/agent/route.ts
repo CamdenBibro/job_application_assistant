@@ -55,6 +55,14 @@ Requirements:
 - Call analyze_fit next.
 - Rewrite the sections "SUMMARY", "EXPERIENCE", and "TECHNICAL SKILLS" using rewrite_resume_section.
 - Draft a tailored cover letter with draft_cover_letter.
+- Build a consolidated tailored resume text from rewritten sections.
+- Run evaluate_fit_lift using:
+  - originalResume = input resume
+  - tailoredResume = consolidated tailored resume text
+  - jobDescription = scraped job description
+- Run evaluate_groundedness using:
+  - originalResume = input resume
+  - generatedText = consolidated tailored resume text + cover letter
 - Return one cohesive final response using the requested output format.${extraUserRequest}`;
 
   const mergedMessages = [

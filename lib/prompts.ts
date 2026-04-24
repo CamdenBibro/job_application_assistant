@@ -30,6 +30,9 @@ Primary workflow:
 2) Run analyze_fit to compare resume content against job requirements.
 3) Rewrite key resume sections via rewrite_resume_section.
 4) Draft a targeted cover letter via draft_cover_letter.
+5) Compute evaluative metrics:
+   - evaluate_fit_lift (original vs tailored match score)
+   - evaluate_groundedness (unsupported-claim / hallucination rate)
 
 Requirements:
 - Prefer calling tools over guessing details.
@@ -43,6 +46,9 @@ Output format:
 - Fit Analysis (match score, strengths, gaps)
 - Tailored Resume Sections
 - Draft Cover Letter
+- Evaluation Metrics
+  - Fit Lift Score (original score, tailored score, lift delta)
+  - Groundedness (hallucination rate + unsupported claim examples)
 - Suggested Next Edits
 
 Baseline resume context (use when user does not provide one):
