@@ -71,6 +71,29 @@ function extractKeywords(text: string, maxKeywords: number) {
     .map(([word]) => word);
 }
 
+function calculateKeywordFit(jobDescription: string, resumeText: string) {
+  const jdKeywords = extractKeywords(jobDescription, 35);
+  const resumeLower = resumeText.toLowerCase();
+
+  const matchedKeywords = jdKeywords.filter((word) =>
+    resumeLower.includes(word),
+  );
+  const missingKeywords = jdKeywords.filter(
+    (word) => !resumeLower.includes(word),
+  );
+
+  const matchScore = Math.round(
+    (matchedKeywords.length / Math.max(jdKeywords.length, 1)) * 100,
+  );
+
+  return {
+    jdKeywords,
+    matchedKeywords,
+    missingKeywords,
+    matchScore,
+  };
+}
+
 function extractLikelyJobDescription(html: string) {
   const $ = load(html);
   $("script, style, noscript, svg").remove();
@@ -241,19 +264,8 @@ export const tools = {
       resume: z.string().min(50),
     }),
     execute: async ({ jobDescription, resume }) => {
-      const jdKeywords = extractKeywords(jobDescription, 35);
-      const resumeLower = resume.toLowerCase();
-
-      const matchedKeywords = jdKeywords.filter((word) =>
-        resumeLower.includes(word),
-      );
-      const missingKeywords = jdKeywords.filter(
-        (word) => !resumeLower.includes(word),
-      );
-
-      const matchScore = Math.round(
-        (matchedKeywords.length / Math.max(jdKeywords.length, 1)) * 100,
-      );
+      const { matchedKeywords, missingKeywords, matchScore } =
+        calculateKeywordFit(jobDescription, resume);
 
       return {
         matchScore,
@@ -267,6 +279,32 @@ export const tools = {
           missingKeywords.length > 0
             ? `Potential gaps to address: ${missingKeywords.slice(0, 10).join(", ")}.`
             : "No major keyword gaps were detected.",
+      };
+    },
+  }),
+
+  evaluate_fit_lift: tool({
+    description:
+      "Calculate fit lift by comparing original vs tailored resume against the same job description.",
+    inputSchema: z.object({
+      jobDescription: z.string().min(100),
+      originalResume: z.string().min(50),
+      tailoredResume: z.string().min(50),
+    }),
+    execute: async ({ jobDescription, originalResume, tailoredResume }) => {
+      const originalFit = calculateKeywordFit(jobDescription, originalResume);
+      const tailoredFit = calculateKeywordFit(jobDescription, tailoredResume);
+      const fitLift = tailoredFit.matchScore - originalFit.matchScore;
+
+      return {
+        originalMatchScore: originalFit.matchScore,
+        tailoredMatchScore: tailoredFit.matchScore,
+        fitLift,
+        originalMatchedKeywords: originalFit.matchedKeywords,
+        tailoredMatchedKeywords: tailoredFit.matchedKeywords,
+        newlyMatchedKeywords: tailoredFit.matchedKeywords.filter(
+          (keyword) => !originalFit.matchedKeywords.includes(keyword),
+        ),
       };
     },
   }),
@@ -359,6 +397,88 @@ ${jobDescription.slice(0, 6000)}
       return {
         coverLetter: text.trim(),
       };
+    },
+  }),
+
+  evaluate_groundedness: tool({
+    description:
+      "Estimate unsupported-claim rate by checking if generated claims are grounded in original resume evidence.",
+    inputSchema: z.object({
+      originalResume: z.string().min(50),
+      generatedText: z.string().min(50).describe("Rewritten resume + cover letter"),
+    }),
+    execute: async ({ originalResume, generatedText }) => {
+      const { text } = await generateText({
+        model: REWRITE_MODEL,
+        system:
+          "You are a strict factuality evaluator for resume tailoring output. Be conservative when judging support.",
+        prompt: `
+Evaluate groundedness of generated job-application text against the original resume.
+
+Definitions:
+- A claim is "supported" if the original resume contains direct evidence for it.
+- A claim is "unsupported" if it adds facts/experience/metrics/skills not substantiated by the original resume.
+
+Return ONLY valid JSON with this shape:
+{
+  "totalClaims": number,
+  "supportedClaims": number,
+  "unsupportedClaims": number,
+  "hallucinationRate": number,
+  "unsupportedExamples": string[],
+  "notes": string
+}
+
+Rules:
+- hallucinationRate = unsupportedClaims / max(totalClaims, 1)
+- Keep unsupportedExamples to at most 5 concise claims.
+- If uncertain, count as unsupported.
+
+Original resume:
+${originalResume.slice(0, 7000)}
+
+Generated text:
+${generatedText.slice(0, 9000)}
+`.trim(),
+      });
+
+      try {
+        const parsed = JSON.parse(text) as {
+          totalClaims?: number;
+          supportedClaims?: number;
+          unsupportedClaims?: number;
+          hallucinationRate?: number;
+          unsupportedExamples?: string[];
+          notes?: string;
+        };
+
+        const totalClaims = Math.max(0, parsed.totalClaims ?? 0);
+        const supportedClaims = Math.max(0, parsed.supportedClaims ?? 0);
+        const unsupportedClaims = Math.max(0, parsed.unsupportedClaims ?? 0);
+        const calculatedRate =
+          totalClaims > 0 ? unsupportedClaims / totalClaims : 0;
+
+        return {
+          totalClaims,
+          supportedClaims,
+          unsupportedClaims,
+          hallucinationRate: Number(
+            (parsed.hallucinationRate ?? calculatedRate).toFixed(3),
+          ),
+          unsupportedExamples: (parsed.unsupportedExamples ?? []).slice(0, 5),
+          notes: parsed.notes ?? "",
+        };
+      } catch {
+        return {
+          totalClaims: 0,
+          supportedClaims: 0,
+          unsupportedClaims: 0,
+          hallucinationRate: 0,
+          unsupportedExamples: [],
+          notes:
+            "Could not parse evaluator output as JSON. Re-run groundedness evaluation if needed.",
+        };
+      }
     },
   }),
 };
