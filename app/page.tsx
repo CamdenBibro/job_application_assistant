@@ -10,6 +10,34 @@ function formatJson(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
 
+function getLatestCoverLetter(messages: UIMessage[]) {
+  for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+    const message = messages[messageIndex];
+    for (let partIndex = message.parts.length - 1; partIndex >= 0; partIndex--) {
+      const part = message.parts[partIndex] as {
+        type?: string;
+        state?: string;
+        output?: unknown;
+      };
+
+      if (
+        part.type === "tool-draft_cover_letter" &&
+        part.state === "output-available" &&
+        part.output &&
+        typeof part.output === "object" &&
+        "coverLetter" in part.output
+      ) {
+        const coverLetter = (part.output as { coverLetter?: unknown }).coverLetter;
+        if (typeof coverLetter === "string" && coverLetter.trim()) {
+          return coverLetter.trim();
+        }
+      }
+    }
+  }
+
+  return "";
+}
+
 type SavedChat = {
   id: string;
   label: string;
@@ -48,6 +76,7 @@ export default function Home() {
     "Tailor my resume and draft a cover letter for this role.",
   );
   const [historyLabel, setHistoryLabel] = useState("");
+  const [showToolPayloads, setShowToolPayloads] = useState(false);
 
   const { messages, sendMessage, setMessages, status, error, stop } = useChat({
     transport: new DefaultChatTransport({
@@ -61,6 +90,10 @@ export default function Home() {
   const assistantMessages = useMemo(
     () => messages.filter((message) => message.role === "assistant"),
     [messages],
+  );
+  const latestCoverLetter = useMemo(
+    () => getLatestCoverLetter(assistantMessages),
+    [assistantMessages],
   );
 
   useEffect(() => {
@@ -276,9 +309,18 @@ export default function Home() {
         <section className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
           <div className="mb-3 flex items-center justify-between">
             <h2 className="text-lg font-semibold">Streaming output</h2>
-            <span className="text-xs uppercase tracking-wide text-zinc-500">
-              {status}
-            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowToolPayloads((value) => !value)}
+                className="rounded border border-zinc-300 px-2 py-1 text-xs font-medium dark:border-zinc-700"
+              >
+                {showToolPayloads ? "Hide tool payloads" : "Show tool payloads"}
+              </button>
+              <span className="text-xs uppercase tracking-wide text-zinc-500">
+                {status}
+              </span>
+            </div>
           </div>
 
           {error ? (
@@ -287,10 +329,19 @@ export default function Home() {
             </p>
           ) : null}
 
+          {latestCoverLetter ? (
+            <article className="mb-4 rounded-md border border-blue-200 bg-blue-50 p-3 dark:border-blue-900 dark:bg-blue-950">
+              <h3 className="text-sm font-semibold">Draft Cover Letter</h3>
+              <pre className="mt-2 whitespace-pre-wrap text-sm">
+                {latestCoverLetter}
+              </pre>
+            </article>
+          ) : null}
+
           {assistantMessages.length === 0 ? (
             <p className="rounded-md border border-dashed border-zinc-300 p-6 text-sm text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
-              Submit a job URL to start. Tool calls and final outputs will
-              stream here.
+              Submit a job URL to start. A concise final response and your full
+              cover letter will appear here.
             </p>
           ) : (
             <div className="space-y-4">
@@ -355,20 +406,30 @@ export default function Home() {
                           <p className="mt-1 text-zinc-500 dark:text-zinc-400">
                             state: {toolPart.state}
                           </p>
-                          {toolPart.input ? (
-                            <pre className="mt-2 whitespace-pre-wrap">
-                              input: {formatJson(toolPart.input)}
-                            </pre>
-                          ) : null}
-                          {toolPart.output ? (
-                            <pre className="mt-2 whitespace-pre-wrap">
-                              output: {formatJson(toolPart.output)}
-                            </pre>
-                          ) : null}
-                          {toolPart.errorText ? (
-                            <p className="mt-2 text-red-600 dark:text-red-400">
-                              error: {toolPart.errorText}
+                          {!showToolPayloads &&
+                          (toolPart.input || toolPart.output || toolPart.errorText) ? (
+                            <p className="mt-2 text-zinc-500 dark:text-zinc-400">
+                              payload hidden
                             </p>
+                          ) : null}
+                          {showToolPayloads ? (
+                            <>
+                              {toolPart.input ? (
+                                <pre className="mt-2 whitespace-pre-wrap">
+                                  input: {formatJson(toolPart.input)}
+                                </pre>
+                              ) : null}
+                              {toolPart.output ? (
+                                <pre className="mt-2 whitespace-pre-wrap">
+                                  output: {formatJson(toolPart.output)}
+                                </pre>
+                              ) : null}
+                              {toolPart.errorText ? (
+                                <p className="mt-2 text-red-600 dark:text-red-400">
+                                  error: {toolPart.errorText}
+                                </p>
+                              ) : null}
+                            </>
                           ) : null}
                         </div>
                       );

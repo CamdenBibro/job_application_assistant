@@ -63,7 +63,9 @@ Requirements:
 - Run evaluate_groundedness using:
   - originalResume = input resume
   - generatedText = consolidated tailored resume text + cover letter
-- Return one cohesive final response using the requested output format.${extraUserRequest}`;
+- Keep intermediate narration short while tools run.
+- Return one concise final response using the requested output format.
+- In the final response, include the complete cover letter under heading "FULL COVER LETTER".${extraUserRequest}`;
 
   const mergedMessages = [
     ...messages,
